@@ -1,9 +1,13 @@
-import type { PendingInteractionStatus, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
+import type { PendingInteractionStatus, SessionId, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
 import type { NotifyRemind } from '../notify-settings.ts'
 
 export interface NotificationEdge {
   sessionId: string
-  sound: 'waiting' | 'completed'
+  sound: 'waiting'
+}
+
+export interface CompletionCandidate {
+  rootSessionId: string
 }
 
 export interface NotificationEdgeOptions {
@@ -12,47 +16,91 @@ export interface NotificationEdgeOptions {
   remind: NotifyRemind
 }
 
+export interface TaskGroupSnapshot {
+  rootSessionId: string
+  busy: boolean
+  pending: boolean
+  backgroundCompleted: boolean
+}
+
 export interface NotificationEdgeState {
-  running: Map<string, boolean>
-  runningSince: Map<string, number>
+  groupBusy: Map<string, boolean>
+  groupBusySince: Map<string, number>
   pending: Map<string, PendingInteractionStatus | undefined>
 }
 
 export function emptyNotificationEdgeState(): NotificationEdgeState {
-  return { running: new Map(), runningSince: new Map(), pending: new Map() }
+  return { groupBusy: new Map(), groupBusySince: new Map(), pending: new Map() }
+}
+
+function rootId(row: SessionSummary, byId: ReadonlyMap<string, SessionSummary>): string {
+  let current = row
+  const seen = new Set<string>()
+  while (current.parentId !== undefined && !seen.has(current.id)) {
+    seen.add(current.id)
+    const parent = byId.get(current.parentId)
+    if (parent === undefined) return current.parentId
+    current = parent
+  }
+  return current.id
+}
+
+export function taskGroups(rows: readonly SessionSummary[]): Map<string, TaskGroupSnapshot> {
+  const byId = new Map(rows.map(row => [row.id, row]))
+  const groups = new Map<string, TaskGroupSnapshot>()
+  for (const row of rows) {
+    const rootSessionId = rootId(row, byId)
+    const group = groups.get(rootSessionId) ?? {
+      rootSessionId,
+      busy: false,
+      pending: false,
+      backgroundCompleted: false,
+    }
+    group.busy ||= row.running
+    group.pending ||= row.pendingInteraction !== undefined
+    if (row.id === rootSessionId) group.backgroundCompleted = row.completed === true
+    groups.set(rootSessionId, group)
+  }
+  return groups
 }
 
 export function collectNotificationEdges(
   previous: NotificationEdgeState,
   rows: readonly SessionSummary[],
   options: NotificationEdgeOptions,
-): { edges: NotificationEdge[]; state: NotificationEdgeState } {
+): { edges: NotificationEdge[]; completions: CompletionCandidate[]; groups: Map<string, TaskGroupSnapshot>; state: NotificationEdgeState } {
   const state = emptyNotificationEdgeState()
   const edges: NotificationEdge[] = []
+  const completions: CompletionCandidate[] = []
+  const groups = taskGroups(rows)
+
   for (const row of rows) {
-    const prevRunning = previous.running.get(row.id)
+    const wasObserved = previous.pending.has(row.id)
     const prevPending = previous.pending.get(row.id)
-    state.running.set(row.id, row.running)
     state.pending.set(row.id, row.pendingInteraction)
-
-    if (prevRunning === undefined) {
-      if (row.running) state.runningSince.set(row.id, options.now)
-      continue
-    }
-
-    if (row.running) state.runningSince.set(row.id, previous.runningSince.get(row.id) ?? options.now)
-
-    if (prevPending === undefined && row.pendingInteraction !== undefined) {
+    if (wasObserved && prevPending === undefined && row.pendingInteraction !== undefined) {
       edges.push({ sessionId: row.id, sound: 'waiting' })
     }
+  }
 
-    if (prevRunning && !row.running && row.pendingInteraction === undefined) {
-      const since = previous.runningSince.get(row.id)
+  for (const group of groups.values()) {
+    const prevBusy = previous.groupBusy.get(group.rootSessionId)
+    state.groupBusy.set(group.rootSessionId, group.busy)
+    if (prevBusy === undefined) {
+      if (group.busy) state.groupBusySince.set(group.rootSessionId, options.now)
+      continue
+    }
+    if (group.busy) {
+      state.groupBusySince.set(group.rootSessionId, previous.groupBusySince.get(group.rootSessionId) ?? options.now)
+      continue
+    }
+    if (prevBusy && !group.pending) {
+      const since = previous.groupBusySince.get(group.rootSessionId)
       const durationMs = since === undefined ? 0 : options.now - since
-      if (durationMs >= options.minRunMs && (options.remind === 'any' || row.completed === true)) {
-        edges.push({ sessionId: row.id, sound: 'completed' })
+      if (durationMs >= options.minRunMs && (options.remind === 'any' || group.backgroundCompleted)) {
+        completions.push({ rootSessionId: group.rootSessionId })
       }
     }
   }
-  return { edges, state }
+  return { edges, completions, groups, state }
 }

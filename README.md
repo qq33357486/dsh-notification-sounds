@@ -25,7 +25,7 @@ AI 工作时，你可以去处理别的事情。
 | 时机 | 中文音频 |
 |---|---|
 | 需要审批、确认、计划审核或回答问题 | **任务等待** |
-| AI 当前任务完成 | **任务完成** |
+| 一个主会话及其全部子代理稳定完成 | **任务完成** |
 
 ### 一键安装
 
@@ -37,7 +37,7 @@ dsh plugin --profile web add dsh-notification-sounds
 
 `Settings → General → DSH Notification Sounds`
 
-打开通知并试听两个声音。首次进入页面后点击或按键一次，以解锁浏览器音频。
+打开通知并试听两个声音。子代理单独完成不会响；只有所属主会话及其全部子代理稳定完成后才播放“任务完成”。多个主会话彼此独立。首次进入页面后点击或按键一次，以解锁浏览器音频。
 
 <details>
 <summary><strong>让 AI 帮你安装</strong></summary>
@@ -69,7 +69,7 @@ dsh plugin --profile web up dsh-notification-sounds
 Let AI work in the background without pulling you into constant progress checks.
 
 - **“任务等待”** plays when AI needs your action.
-- **“任务完成”** plays when the task is complete.
+- **“任务完成”** plays only after a root session and all of its subagents are stably idle.
 
 **Stay focused. Switch less. Return at the right moment.**
 

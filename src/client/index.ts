@@ -4,7 +4,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { loadNotifySettings, saveNotifySettings, type NotifySettings } from '../notify-settings.ts'
 import { createNotifyPlayer } from './audio.ts'
-import { collectNotificationEdges, emptyNotificationEdgeState } from './notification-edges.ts'
+import { collectNotificationEdges, emptyNotificationEdgeState, taskGroups } from './notification-edges.ts'
 import { createNotifyRowStore } from './settings-store.ts'
 import { NotifyRow, type NotifyRowInjected } from './NotifyRow.tsx'
 import { en, zh, type NotifyKey } from './locales.ts'
@@ -20,25 +20,54 @@ export function apply(ctx: ClientContext): void {
   const player = createNotifyPlayer()
   const store = createNotifyRowStore()
   let current: NotifySettings = loadNotifySettings()
+  const COMPLETION_STABLE_MS = 1_000
   let edgeState = emptyNotificationEdgeState()
+  const completionTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const cancelCompletion = (rootSessionId: string): void => {
+    const timer = completionTimers.get(rootSessionId)
+    if (timer !== undefined) clearTimeout(timer)
+    completionTimers.delete(rootSessionId)
+  }
+  const scheduleCompletion = (rootSessionId: string): void => {
+    cancelCompletion(rootSessionId)
+    const timer = setTimeout(() => {
+      completionTimers.delete(rootSessionId)
+      const rows = Object.values(ctx.sessions.list.getSnapshot().byId)
+      const group = taskGroups(rows).get(rootSessionId)
+      if (group === undefined || group.busy || group.pending) return
+      if (!current.enabled || !current.completedEnabled) return
+      if (current.remind === 'background-only' && !group.backgroundCompleted) return
+      player.play('completed', current.volume)
+    }, COMPLETION_STABLE_MS)
+    completionTimers.set(rootSessionId, timer)
+  }
   const onListChange = (): void => {
     const snapshot = ctx.sessions.list.getSnapshot()
-    const result = collectNotificationEdges(edgeState, Object.values(snapshot.byId), {
+    const rows = Object.values(snapshot.byId)
+    const result = collectNotificationEdges(edgeState, rows, {
       now: Date.now(), minRunMs: current.minRunMs, remind: current.remind,
     })
     edgeState = result.state
-    if (!current.enabled) return
-    if (current.waitingEnabled && result.edges.some(edge => edge.sound === 'waiting')) {
+    for (const [rootSessionId, timer] of completionTimers) {
+      const group = result.groups.get(rootSessionId)
+      if (group === undefined || group.busy || group.pending) {
+        clearTimeout(timer)
+        completionTimers.delete(rootSessionId)
+      }
+    }
+    if (current.enabled && current.waitingEnabled && result.edges.length > 0) {
       player.play('waiting', current.volume)
-      return
     }
-    if (current.completedEnabled && result.edges.some(edge => edge.sound === 'completed')) {
-      player.play('completed', current.volume)
-    }
+    for (const completion of result.completions) scheduleCompletion(completion.rootSessionId)
   }
   ctx.effect(() => {
     onListChange()
-    return ctx.sessions.list.subscribe(onListChange)
+    const unsubscribe = ctx.sessions.list.subscribe(onListChange)
+    return () => {
+      unsubscribe()
+      for (const timer of completionTimers.values()) clearTimeout(timer)
+      completionTimers.clear()
+    }
   }, 'notification-sounds: session watch')
 
   const unlock = (): void => { player.unlock() }
