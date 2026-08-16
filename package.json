@@ -1,7 +1,7 @@
 {
   "name": "dsh-notification-sounds",
   "description": "Cross-platform waiting-for-user and completion sound notifications for the DeepSeek Harness web UI.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
