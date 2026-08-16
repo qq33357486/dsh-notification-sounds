@@ -22,7 +22,9 @@ jobs:
       - run: pnpm run check
       - name: Verify tag matches package version
         shell: bash
-        run: test "$GITHUB_REF_NAME" = "v$(node -p \"require('./package.json').version\")"
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          test "$GITHUB_REF_NAME" = "v$PACKAGE_VERSION"
       - name: Publish to npm
         run: pnpm publish --no-git-checks --access public
         env:
