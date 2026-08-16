@@ -1,0 +1,4 @@
+# DSH Notification Sounds bundle patch.
+- insert:
+    - id: notification-sounds
+      name: dsh-notification-sounds

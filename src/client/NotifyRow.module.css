@@ -1,0 +1,6 @@
+.row { display:flex; flex-direction:column; gap:10px; padding:12px 0; }
+.title { color:var(--dsw-alias-label-primary); font-weight:600; }
+.field { display:flex; align-items:center; gap:10px; color:var(--dsw-alias-label-secondary); }
+.field > span:first-child { min-width:140px; }
+.preview { color:var(--dsw-alias-brand-primary); cursor:pointer; background:transparent; border:0; }
+.muted { color:var(--dsw-alias-label-secondary); min-width:42px; }
